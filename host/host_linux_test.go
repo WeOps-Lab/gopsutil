@@ -5,6 +5,8 @@ package host
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/shirou/gopsutil/v3/common"
@@ -61,6 +63,108 @@ func TestGetRedhatishPlatform(t *testing.T) {
 	ret = getRedhatishPlatform(c)
 	if ret != "" {
 		t.Errorf("Could not get platform with no value: %v", ret)
+	}
+}
+
+func TestGetKylinVersion(t *testing.T) {
+	cases := []struct {
+		name     string
+		contents []string
+		want     string
+	}{
+		{
+			name:     "skip host in release",
+			contents: []string{"Kylin Linux Advanced Server Host release Host V10 (Kivity)"},
+			want:     "v10 (kivity)",
+		},
+		{
+			name:     "skip host without release",
+			contents: []string{"Kylin Linux Advanced Server Host V10 (Kivity)"},
+			want:     "v10 (kivity)",
+		},
+		{
+			name:     "numeric version",
+			contents: []string{"Kylin Linux release 10 (Kivity)"},
+			want:     "10 (kivity)",
+		},
+		{
+			name:     "skip arbitrary description words",
+			contents: []string{"Kylin Linux Advanced Server Host Edition release Server Host V10 (Kivity)"},
+			want:     "v10 (kivity)",
+		},
+		{
+			name:     "numeric dotted version",
+			contents: []string{"Kylin Linux Advanced Server release 10.1 SP1"},
+			want:     "10.1",
+		},
+		{
+			name:     "no version",
+			contents: []string{"Kylin Linux Advanced Server Host"},
+			want:     "",
+		},
+	}
+
+	for _, tt := range cases {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getKylinVersion(tt.contents); got != tt.want {
+				t.Errorf("want %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestPlatformInformationKylinPreferOSReleaseVersionID(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "os-release"), []byte(`NAME="Kylin Linux Advanced Server Host"
+VERSION="V10 (Kivity)"
+ID="kylin"
+VERSION_ID="V10"
+PRETTY_NAME="Kylin Linux Advanced Server Host V10 (Kivity)"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "system-release"), []byte("Kylin Linux Advanced Server Host release Host V10 (Kivity)\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.WithValue(context.Background(),
+		common.EnvKey,
+		common.EnvMap{common.HostEtcEnvKey: root},
+	)
+
+	platform, _, version, err := PlatformInformationWithContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if platform != "kylin" {
+		t.Errorf("platform: want %q, got %q", "kylin", platform)
+	}
+	if version != "V10" {
+		t.Errorf("version: want %q, got %q", "V10", version)
+	}
+}
+
+func TestPlatformInformationKylinFallbackReleaseFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "os-release"), []byte(`ID="kylin"`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "system-release"), []byte("Kylin Linux Advanced Server Host release Host V10 (Kivity)\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.WithValue(context.Background(),
+		common.EnvKey,
+		common.EnvMap{common.HostEtcEnvKey: root},
+	)
+
+	_, _, version, err := PlatformInformationWithContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "v10 (kivity)" {
+		t.Errorf("version: want %q, got %q", "v10 (kivity)", version)
 	}
 }
 

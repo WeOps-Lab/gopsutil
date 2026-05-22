@@ -208,7 +208,11 @@ func PlatformInformationWithContext(ctx context.Context) (platform string, famil
 			version = lsb.Release
 		} else if lsb.ID == "Kylin" {
 			platform = "Kylin"
-			version = lsb.Release
+			if _, osReleaseVersion := getKylinOSReleaseVersion(ctx); osReleaseVersion != "" {
+				version = osReleaseVersion
+			} else {
+				version = getKylinVersion([]string{lsb.Release})
+			}
 		} else if lsb.ID == `"Cumulus Linux"` {
 			platform = "cumuluslinux"
 			version = lsb.Release
@@ -232,14 +236,22 @@ func PlatformInformationWithContext(ctx context.Context) (platform string, famil
 	} else if common.PathExists(common.HostEtcWithContext(ctx, "neokylin-release")) {
 		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "neokylin-release"))
 		if err == nil {
-			version = getKylinVersion(contents)
 			platform = getRedhatishPlatform(contents)
+			if _, osReleaseVersion := getKylinOSReleaseVersion(ctx); osReleaseVersion != "" {
+				version = osReleaseVersion
+			} else {
+				version = getKylinVersion(contents)
+			}
 		}
 	} else if common.PathExists(common.HostEtcWithContext(ctx, "kylin-release")) {
 		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "kylin-release"))
 		if err == nil {
-			version = getKylinVersion(contents)
 			platform = getRedhatishPlatform(contents)
+			if _, osReleaseVersion := getKylinOSReleaseVersion(ctx); osReleaseVersion != "" {
+				version = osReleaseVersion
+			} else {
+				version = getKylinVersion(contents)
+			}
 		}
 	} else if common.PathExists(common.HostEtcWithContext(ctx, "redflag-release")) {
 		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "redflag-release"))
@@ -257,8 +269,16 @@ func PlatformInformationWithContext(ctx context.Context) (platform string, famil
 	} else if common.PathExists(common.HostEtcWithContext(ctx, "system-release")) {
 		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "system-release"))
 		if err == nil {
-			version = getRedhatishVersion(contents)
 			platform = getRedhatishPlatform(contents)
+			if isKylinPlatform(platform) {
+				if _, osReleaseVersion := getKylinOSReleaseVersion(ctx); osReleaseVersion != "" {
+					version = osReleaseVersion
+				} else {
+					version = getKylinVersion(contents)
+				}
+			} else {
+				version = getRedhatishVersion(contents)
+			}
 		}
 	} else if common.PathExists(common.HostEtcWithContext(ctx, "gentoo-release")) {
 		platform = "gentoo"
@@ -341,6 +361,42 @@ func PlatformInformationWithContext(ctx context.Context) (platform string, famil
 	return platform, family, version, nil
 }
 
+func getKylinOSReleaseVersion(ctx context.Context) (platform string, version string) {
+	contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "os-release"))
+	if err != nil {
+		return "", ""
+	}
+
+	for _, line := range contents {
+		field := strings.SplitN(line, "=", 2)
+		if len(field) < 2 {
+			continue
+		}
+		value := strings.Trim(field[1], `"`)
+		switch field[0] {
+		case "ID":
+			platform = value
+		case "VERSION_ID":
+			version = value
+		case "VERSION":
+			if version == "" {
+				version = value
+			}
+		}
+	}
+
+	if !isKylinPlatform(platform) {
+		return "", ""
+	}
+
+	return platform, version
+}
+
+func isKylinPlatform(platform string) bool {
+	platform = strings.ToLower(strings.Trim(platform, `"`))
+	return platform == "kylin" || platform == "neokylin"
+}
+
 func KernelVersionWithContext(ctx context.Context) (version string, err error) {
 	var utsname unix.Utsname
 	err = unix.Uname(&utsname)
@@ -357,10 +413,16 @@ func getSlackwareVersion(contents []string) string {
 }
 
 func getKylinVersion(contents []string) string {
-	c := strings.ToLower(strings.Join(contents, ""))
+	c := strings.ToLower(strings.Join(contents, " "))
+	if idx := strings.Index(c, "release"); idx >= 0 {
+		c = c[idx+len("release"):]
+	}
 
-	if matches := regexp.MustCompile(`release (.*)`).FindStringSubmatch(c); matches != nil {
-		return matches[1]
+	matches := regexp.MustCompile(`(?:^|[\s(/_-])(v?\d+(?:[._-]\d+)*(?:\s+\([^)]*\))?)`).FindAllStringSubmatch(c, -1)
+	for _, match := range matches {
+		if len(match) > 1 && !strings.HasSuffix(match[1], ".") {
+			return strings.TrimSpace(match[1])
+		}
 	}
 
 	return ""
