@@ -232,9 +232,22 @@ func PlatformInformationWithContext(ctx context.Context) (platform string, famil
 	} else if common.PathExists(common.HostEtcWithContext(ctx, "neokylin-release")) {
 		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "neokylin-release"))
 		if err == nil {
-			version = getRedhatishVersion(contents)
+			version = getKylinVersion(contents)
 			platform = getRedhatishPlatform(contents)
 		}
+	} else if common.PathExists(common.HostEtcWithContext(ctx, "kylin-release")) {
+		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "kylin-release"))
+		if err == nil {
+			version = getKylinVersion(contents)
+			platform = getRedhatishPlatform(contents)
+		}
+	} else if common.PathExists(common.HostEtcWithContext(ctx, "redflag-release")) {
+		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "redflag-release"))
+		if err == nil {
+			version = getRedFlagReleaseVersion(contents)
+			platform = getRedFlagPlatform(contents)
+		}
+
 	} else if common.PathExists(common.HostEtcWithContext(ctx, "redhat-release")) {
 		contents, err := common.ReadLines(common.HostEtcWithContext(ctx, "redhat-release"))
 		if err == nil {
@@ -319,6 +332,10 @@ func PlatformInformationWithContext(ctx context.Context) (platform string, famil
 		family = "solus"
 	case "neokylin":
 		family = "neokylin"
+	case "kylin":
+		family = "kylin"
+	case "redflag":
+		family = "redflag"
 	}
 
 	return platform, family, version, nil
@@ -337,6 +354,39 @@ func getSlackwareVersion(contents []string) string {
 	c := strings.ToLower(strings.Join(contents, ""))
 	c = strings.Replace(c, "slackware ", "", 1)
 	return c
+}
+
+func getKylinVersion(contents []string) string {
+	c := strings.ToLower(strings.Join(contents, ""))
+
+	if matches := regexp.MustCompile(`release (.*)`).FindStringSubmatch(c); matches != nil {
+		return matches[1]
+	}
+
+	return ""
+}
+
+func getRedFlagReleaseVersion(contents []string) string {
+	if len(contents) == 0 {
+		return ""
+	}
+	re := regexp.MustCompile(`release\s+([\d.]+)`)
+	matches := re.FindStringSubmatch(contents[0])
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
+
+func getRedFlagPlatform(contents []string) string {
+	if len(contents) == 0 {
+		return ""
+	}
+	c := strings.ToLower(contents[0])
+	if strings.Contains(c, "redflag") {
+		return "redflag"
+	}
+	return ""
 }
 
 func getRedhatishVersion(contents []string) string {
